@@ -1,0 +1,2 @@
+# AI
+pycharm练习
