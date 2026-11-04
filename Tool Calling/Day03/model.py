@@ -16,6 +16,10 @@ class CityQuality(BaseModel):
     latitude: str = Field(description="城市纬度")
     longitude: str = Field(description="城市经度")
 
+class RoomInfo(BaseModel):
+    """根据会议室名称查询地址、人数等信息"""
+    room_name: str = Field(description="要查询的会议室名称")
+
 
 #工具合同
 city_tool = {
@@ -48,8 +52,18 @@ quality_tool = {
     },
 }
 
+room_tool = {
+    "type": "function",
+    "function": {
+        "name": "get_room_info",
+        "description": "根据会议室名称查询地址、人数等信息时调用此工具",
+        "strict": True,
+        "parameters": RoomInfo.model_json_schema(),
+    },
+}
+
 # 给模型传递的工具列表
-TOOLS = [city_tool, weather_tool, quality_tool]
+TOOLS = [city_tool, weather_tool, quality_tool, room_tool]
 
 
 

@@ -203,5 +203,86 @@
                 "content": "您好！我这里的系统没有 `/history` 这样的命令哦。不过，我可以帮您回顾一下我们刚才的对话内容：\n\n1. **第一轮**：您查询了**北京**和**上海**的实时天气。\n2. **第二轮**：您让我进行了**自我介绍**。\n3. **第三轮**：您查询了**广州**和**深圳**的空气质量。\n4. **第四轮**：您输入了“2”，我询问了您的具体需求。\n\n请问您是想回顾某个具体城市的数据，还是有新的城市需要查询呢？随时告诉我！"
             }
         ]
+    },
+    {
+        "id": "40a49654f6f7",
+        "tracks": [
+            {
+                "role": "user",
+                "content": "查询会议室"
+            },
+            {
+                "role": "assistant",
+                "content": "您好！请问您想查询哪个会议室的信息呢？\n\n请提供具体的**会议室名称**，我会为您查询它的地址、容纳人数等详细信息。"
+            }
+        ]
+    },
+    {
+        "id": "3d70a1e0612d",
+        "tracks": [
+            {
+                "role": "user",
+                "content": "晨曦会议室"
+            },
+            {
+                "content": "",
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_cfed04ac0a7644a6ba8cc8ee",
+                        "function": {
+                            "arguments": "{\"room_name\": \"晨曦会议室\"}",
+                            "name": "get_room_info"
+                        },
+                        "type": "function",
+                        "index": 0
+                    }
+                ],
+                "reasoning_content": "用户要求查询\"晨曦会议室\"的信息。\n根据规则，当用户提供会议室名称时，调用 get_room_info 获取真实地址、人数等信息。\n参数：room_name = \"晨曦会议室\""
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_cfed04ac0a7644a6ba8cc8ee",
+                "content": "{\"status\": \"error\", \"message\": \"未找到会议室「晨曦会议室」，请确认名称后重试！\", \"data\": null}"
+            },
+            {
+                "role": "assistant",
+                "content": "抱歉，系统里没有查询到名为“晨曦会议室”的信息。\n\n请您确认一下会议室的名称是否准确，或者是否有其他别名？确认后我会重新为您查询。"
+            }
+        ]
+    },
+    {
+        "id": "b6100ca8f02d",
+        "tracks": [
+            {
+                "role": "user",
+                "content": "查询星辰会议室"
+            },
+            {
+                "content": "",
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_472fb9293b38480a8fbe64b5",
+                        "function": {
+                            "arguments": "{\"room_name\": \"星辰会议室\"}",
+                            "name": "get_room_info"
+                        },
+                        "type": "function",
+                        "index": 0
+                    }
+                ],
+                "reasoning_content": "用户查询“星辰会议室”的信息。\n我需要调用 `get_room_info` 工具，参数 `room_name` 为 \"星辰会议室\"。"
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_472fb9293b38480a8fbe64b5",
+                "content": "{\"status\": \"success\", \"message\": \"查询成功\", \"data\": {\"name\": \"星辰会议室\", \"address\": \"北京市海淀区中关村软件园二期 8 号楼 3 层\", \"floor\": \"3 层\", \"capacity\": 20, \"equipment\": [\"投影仪\", \"视频会议终端\", \"白板\", \"无线投屏\"]}}"
+            },
+            {
+                "role": "assistant",
+                "content": "为您查询到“星辰会议室”的信息如下：\n\n- **会议室名称**：星辰会议室\n- **地址**：北京市海淀区中关村软件园二期 8 号楼 3 层\n- **所在楼层**：3 层\n- **容纳人数**：20 人\n- **配备设备**：投影仪、视频会议终端、白板、无线投屏\n\n如果您还需要查询其他会议室或有其他需求，请随时告诉我！"
+            }
+        ]
     }
 ]

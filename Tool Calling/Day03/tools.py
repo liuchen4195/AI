@@ -1,6 +1,11 @@
 import requests
-from model import CityPOS, CityQuality, CityWeather
+from model import CityPOS, CityQuality, CityWeather, RoomInfo
 import aiohttp
+import json
+from pathlib import Path
+
+# 会议室数据文件路径（与 history.json 相同约定：从 Day03 目录运行）
+MEETING_ROOMS_PATH = Path("data/meeting_rooms.json")
 
 
 # 查询城市经纬度, async def: 定义异步函数
@@ -47,6 +52,49 @@ async def get_quality(latitude:str, longitude:str):
             }
 
 
+# 读取会议室数据文件（容错：文件不存在或损坏时返回空列表）
+def load_meeting_rooms():
+    try:
+        rooms = json.loads(MEETING_ROOMS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    return rooms if isinstance(rooms, list) else []
+
+
+# 查询会议室信息（地址、人数等），数据来自本地 JSON 文件
+async def get_room_info(room_name:str):
+    rooms = load_meeting_rooms()
+    if not rooms:
+        return {
+            "status": "error",
+            "message": "会议室数据读取失败，请稍后重试！",
+            "data": None,
+        }
+
+    # 先按名称精确匹配，再按名称包含关系模糊匹配
+    for room in rooms:
+        if room.get("name") == room_name:
+            return {
+                "status": "success",
+                "message": "查询成功",
+                "data": room,
+            }
+
+    matched = [room for room in rooms if room_name in str(room.get("name", ""))]
+    if matched:
+        return {
+            "status": "success",
+            "message": "查询成功",
+            "data": matched,
+        }
+
+    return {
+        "status": "error",
+        "message": f"未找到会议室「{room_name}」，请确认名称后重试！",
+        "data": None,
+    }
+
+
 # 可以调用的所有工具列表
 tools_map = {
     "get_city_pos": {
@@ -60,6 +108,10 @@ tools_map = {
     "get_quality": {
         "function": get_quality,
         "args": CityQuality
+    },
+    "get_room_info": {
+        "function": get_room_info,
+        "args": RoomInfo
     },
 }
 
