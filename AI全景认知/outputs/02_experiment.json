@@ -1,0 +1,27 @@
+{
+  "experiment_name": "02_ticket_priority_baseline",
+  "data_file": "data\\02_tickets.csv",
+  "sample_count": 60,
+  "feature_columns": [
+    "channel",
+    "customer_level",
+    "has_order_id",
+    "submit_hour",
+    "message_length",
+    "is_night",
+    "is_long_message"
+  ],
+  "target": "is_high_priority",
+  "long_message_threshold": 120,
+  "split_ratio": {
+    "train": 0.6,
+    "validation": 0.2,
+    "test": 0.2
+  },
+  "random_state": 42,
+  "validation_metric": "accuracy",
+  "reference_baseline": "DummyClassifier(strategy='most_frequent')",
+  "candidate_model": "LogisticRegression(max_iter=1000)",
+  "dummy_valid_accuracy": 0.5,
+  "model_valid_accuracy": 0.833
+}
