@@ -17,6 +17,69 @@ const state = {
     traceView: { kind: "empty" },
 };
 
+const STATUS_LABELS = {
+    success: { text: "成功", symbol: "✓", className: "success" },
+    partial: { text: "部分成功", symbol: "!", className: "partial" },
+    failed: { text: "失败", symbol: "×", className: "failed" },
+    running: { text: "处理中", symbol: "…", className: "running" },
+};
+
+const TOOL_STATUS_LABELS = {
+    success: { text: "成功", symbol: "✓", className: "success" },
+    error: { text: "失败", symbol: "×", className: "error" },
+    rejected: { text: "未执行", symbol: "–", className: "rejected" },
+    running: { text: "执行中", symbol: "…", className: "running" },
+    unknown: { text: "状态未知", symbol: "?", className: "unknown" },
+};
+
+const EXECUTION_MODE_LABELS = {
+    none: "未调用工具",
+    serial: "串行调用",
+    parallel: "并行调用",
+    mixed: "混合调用",
+};
+
+const ROUND_MODE_LABELS = {
+    single: "单工具调用",
+    parallel: "并行调用",
+};
+
+const CALL_EXECUTION_LABELS = {
+    serial: "串行",
+    parallel: "并行",
+};
+
+const STOP_REASON_LABELS = {
+    completed: "正常完成",
+    model_request_failed: "模型请求失败",
+    empty_answer: "模型未返回回答",
+    max_model_rounds: "达到最大模型轮次",
+    max_tool_rounds: "达到最大工具轮次",
+    tool_call_limit: "达到工具调用上限",
+    city_limit: "达到城市数量上限",
+    internal_error: "内部错误",
+};
+
+const ERROR_TYPE_LABELS = {
+    tool_not_found: "工具不存在",
+    argument_parse_failed: "参数解析失败",
+    validation_failed: "参数校验失败",
+    timeout: "调用超时",
+    tool_execution_failed: "工具执行失败",
+    tool_reported_error: "工具返回错误",
+    model_request_failed: "模型请求失败",
+    empty_answer: "模型未返回回答",
+    max_model_rounds: "达到最大模型轮次",
+    internal_error: "内部错误",
+};
+
+const FAILURE_STAGE_LABELS = {
+    model_request: "模型请求",
+    final_answer: "最终回答",
+    model_loop: "模型循环",
+    internal: "内部处理",
+};
+
 function makeSpinner() {
     const spinner = document.createElement("span");
     spinner.className = "spinner";
@@ -47,6 +110,392 @@ function renderTraceState(kind, title, detail) {
 
     box.append(heading, detailEl);
     traceContentEl.append(box);
+}
+
+function createElement(tagName, className = "", text = undefined) {
+    const element = document.createElement(tagName);
+    if (className) {
+        element.className = className;
+    }
+    if (text !== undefined) {
+        element.textContent = text;
+    }
+    return element;
+}
+
+function asNumber(value) {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function formatDateTime(value) {
+    if (!value) {
+        return "未记录";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return "未记录";
+    }
+    const pad = (part, length = 2) => String(part).padStart(length, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+        + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.`
+        + `${pad(date.getMilliseconds(), 3)}`;
+}
+
+function formatDuration(value) {
+    const milliseconds = asNumber(value);
+    if (milliseconds === null) {
+        return "未记录";
+    }
+    if (milliseconds < 1000) {
+        return `${milliseconds} ms`;
+    }
+    return `${(milliseconds / 1000).toFixed(2)} s（${milliseconds} ms）`;
+}
+
+function formatCount(value, unit) {
+    const count = asNumber(value);
+    return count === null ? "未记录" : `${count} ${unit}`;
+}
+
+function formatPayload(value, emptyText) {
+    if (value === null || value === undefined) {
+        return emptyText;
+    }
+    if (typeof value === "string") {
+        return value.length ? value : emptyText;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch (error) {
+        return String(value);
+    }
+}
+
+function normalizeTokens(tokens) {
+    const data = tokens || {};
+    const input = asNumber(data.input);
+    const output = asNumber(data.output);
+    const total = asNumber(data.total);
+    const hasAny = input !== null || output !== null || total !== null;
+    const label = (value) => (
+        value === null ? "未返回" : value.toLocaleString("zh-CN")
+    );
+
+    return {
+        input: label(input),
+        output: label(output),
+        total: label(total),
+        partial: data.complete !== true && hasAny,
+    };
+}
+
+function createStat(label, value) {
+    const item = createElement("div", "stat");
+    item.append(
+        createElement("dt", "", label),
+        createElement("dd", "", value)
+    );
+    return item;
+}
+
+function buildStatusBadge(status) {
+    const info = STATUS_LABELS[status] || {
+        text: status || "未知",
+        symbol: "?",
+        className: "unknown",
+    };
+    const badge = createElement("span", `trace-status trace-status-${info.className}`);
+    badge.setAttribute("role", "status");
+
+    const symbol = createElement("span", "trace-status-symbol", info.symbol);
+    symbol.setAttribute("aria-hidden", "true");
+    badge.append(symbol, createElement("span", "trace-status-text", info.text));
+    return badge;
+}
+
+function buildToolStatus(status) {
+    const info = TOOL_STATUS_LABELS[status] || TOOL_STATUS_LABELS.unknown;
+    const badge = createElement("span", `tool-status tool-status-${info.className}`);
+    const symbol = createElement("span", "tool-status-symbol", info.symbol);
+    symbol.setAttribute("aria-hidden", "true");
+    badge.append(symbol, createElement("span", "tool-status-text", info.text));
+    return badge;
+}
+
+function buildRoundBadge(mode) {
+    const label = ROUND_MODE_LABELS[mode] || "未记录";
+    const className = mode === "parallel"
+        ? "parallel"
+        : (mode === "single" ? "single" : "unknown");
+    return createElement("span", `round-badge round-badge-${className}`, label);
+}
+
+function buildFailureBlock(error) {
+    const data = error || {};
+    const block = createElement("div", "trace-failure");
+    block.setAttribute("role", "alert");
+
+    const stage = data.stage
+        ? (FAILURE_STAGE_LABELS[data.stage] || data.stage)
+        : "未记录";
+    const round = asNumber(data.round);
+    const title = data.stage
+        ? `失败阶段：${stage}${round !== null ? `（第 ${round} 次）` : ""}`
+        : "失败阶段：未记录";
+
+    block.append(createElement("p", "trace-failure-title", title));
+
+    if (data.type) {
+        block.append(createElement(
+            "p",
+            "trace-failure-type",
+            `错误类型：${ERROR_TYPE_LABELS[data.type] || data.type}`
+        ));
+    }
+
+    block.append(createElement(
+        "p",
+        "trace-failure-message",
+        data.message || "本轮未能生成最终回答。"
+    ));
+    return block;
+}
+
+function buildTraceOverview(trace) {
+    const section = createElement("section", "trace-overview");
+
+    const head = createElement("div", "trace-overview-head");
+    const question = createElement("div", "trace-question");
+    question.append(
+        createElement("p", "trace-question-label", "本轮问题"),
+        createElement("p", "trace-question-text", trace.question || "未记录")
+    );
+    head.append(question, buildStatusBadge(trace.status));
+    section.append(head);
+
+    if (trace.status === "failed") {
+        section.append(buildFailureBlock(trace.error));
+    }
+
+    const tokens = normalizeTokens(trace.tokens);
+    const stats = createElement("dl", "stat-grid");
+    stats.append(
+        createStat("模型请求", formatCount(trace.model_requests, "次")),
+        createStat("工具调用", formatCount(trace.tool_calls, "次")),
+        createStat("工具轮次", formatCount(trace.tool_rounds, "轮")),
+        createStat("调用方式", EXECUTION_MODE_LABELS[trace.execution_mode] || "未记录"),
+        createStat("开始时间", formatDateTime(trace.started_at)),
+        createStat("结束时间", formatDateTime(trace.finished_at)),
+        createStat("总耗时", formatDuration(trace.duration_ms)),
+        createStat("输入 Token", tokens.input),
+        createStat("输出 Token", tokens.output),
+        createStat("总 Token", tokens.total),
+        createStat(
+            "停止原因",
+            STOP_REASON_LABELS[trace.stop_reason] || trace.stop_reason || "未记录"
+        )
+    );
+    section.append(stats);
+
+    if (tokens.partial) {
+        section.append(createElement(
+            "p",
+            "token-note",
+            "部分模型请求未返回 Token 用量，以上为已返回部分的累计值。"
+        ));
+    }
+
+    return section;
+}
+
+function buildMetaItem(label, value, mono = false) {
+    const item = createElement("div", "tool-meta-item");
+    item.append(
+        createElement("dt", "", label),
+        createElement("dd", mono ? "mono" : "", value)
+    );
+    return item;
+}
+
+function buildDetail(summaryText, contentText) {
+    const details = createElement("details", "tool-detail");
+    details.append(
+        createElement("summary", "", summaryText),
+        createElement("pre", "", contentText)
+    );
+    return details;
+}
+
+function normalizeToolStatus(call) {
+    if (call && TOOL_STATUS_LABELS[call.status]) {
+        return call.status;
+    }
+    if (call && call.error_type) {
+        return "error";
+    }
+    return "unknown";
+}
+
+function buildToolCall(call, roundNumber, roundMode) {
+    call = call || {};
+    const status = normalizeToolStatus(call);
+    const article = createElement("article", `tool-call tool-call-${status}`);
+
+    const head = createElement("div", "tool-call-head");
+    const titleBlock = createElement("div", "tool-call-title-block");
+    titleBlock.append(
+        createElement("p", "tool-call-name", call.name || "未记录"),
+        createElement(
+            "p",
+            "tool-call-description",
+            call.description || "未提供用途说明"
+        )
+    );
+    head.append(titleBlock, buildToolStatus(status));
+    article.append(head);
+
+    const executionLabel = CALL_EXECUTION_LABELS[call.execution]
+        || (roundMode === "parallel"
+            ? "并行"
+            : (roundMode === "single" ? "串行" : "未记录"));
+
+    const meta = createElement("dl", "tool-meta");
+    meta.append(
+        buildMetaItem("调用编号", call.call_id || "未记录", true),
+        buildMetaItem("所属轮次", `第 ${roundNumber} 轮`),
+        buildMetaItem("执行方式", executionLabel),
+        buildMetaItem("开始时间", formatDateTime(call.started_at)),
+        buildMetaItem("结束时间", formatDateTime(call.finished_at)),
+        buildMetaItem(
+            "调用耗时",
+            status === "running" ? "执行中" : formatDuration(call.duration_ms)
+        )
+    );
+    article.append(meta);
+
+    if (call.error_type || status === "error") {
+        const errorBlock = createElement("div", "tool-error");
+        const typeLabel = ERROR_TYPE_LABELS[call.error_type]
+            || call.error_type
+            || "未记录";
+        errorBlock.append(
+            createElement("p", "tool-error-title", `错误类型：${typeLabel}`),
+            createElement(
+                "p",
+                "tool-error-message",
+                call.error_message || "未提供错误信息。"
+            )
+        );
+        article.append(errorBlock);
+    }
+
+    const details = createElement("div", "tool-details");
+    details.append(
+        buildDetail("调用参数", formatPayload(call.arguments, "未记录")),
+        buildDetail(
+            "返回结果",
+            formatPayload(
+                call.result,
+                status === "running" ? "执行中，尚未返回结果。" : "无结果。"
+            )
+        )
+    );
+    article.append(details);
+    return article;
+}
+
+function buildToolRound(round, index) {
+    round = round || {};
+    const calls = Array.isArray(round.calls) ? round.calls : [];
+    const roundNumber = asNumber(round.round) ?? index + 1;
+    const callCount = asNumber(round.call_count) ?? calls.length;
+    const mode = round.mode;
+    const modeLabel = ROUND_MODE_LABELS[mode] || "未记录";
+
+    const container = createElement("section", "tool-round");
+    const head = createElement("div", "tool-round-head");
+    const titleBlock = createElement("div", "tool-round-title-block");
+    titleBlock.append(
+        createElement("p", "tool-round-title", `第 ${roundNumber} 轮`),
+        createElement(
+            "p",
+            "tool-round-meta",
+            `${callCount} 个工具 · ${modeLabel} · 轮次耗时 ${formatDuration(round.duration_ms)}`
+        )
+    );
+    head.append(titleBlock, buildRoundBadge(mode));
+    container.append(head);
+
+    if (mode === "parallel" && callCount > 1) {
+        container.append(createElement(
+            "p",
+            "round-note",
+            "同一轮调用按模型返回顺序展示，不代表完成顺序；完成先后以结束时间为准。"
+        ));
+    }
+
+    const callsEl = createElement("div", "tool-calls");
+    if (calls.length) {
+        calls.forEach((call) => {
+            callsEl.append(buildToolCall(call, roundNumber, mode));
+        });
+    } else {
+        callsEl.append(createElement("p", "tool-round-empty", "该轮未记录工具调用详情。"));
+    }
+    container.append(callsEl);
+    return container;
+}
+
+function buildToolRounds(trace) {
+    const section = createElement("section", "tool-rounds");
+    section.append(createElement("h3", "trace-section-title", "调用过程"));
+
+    const rounds = Array.isArray(trace.rounds) ? trace.rounds : [];
+    if (!rounds.length) {
+        const toolCallCount = asNumber(trace.tool_calls);
+        const hasCalls = toolCallCount !== null && toolCallCount > 0;
+        const empty = createElement("div", "trace-empty-tools");
+        empty.append(
+            createElement(
+                "p",
+                "trace-empty-tools-title",
+                hasCalls ? "工具调用详情未记录" : "本轮未调用工具"
+            ),
+            createElement(
+                "p",
+                "trace-empty-tools-detail",
+                hasCalls
+                    ? "本轮记录到工具调用次数，但没有可展示的轮次详情。"
+                    : "本轮模型直接给出了回答，没有发起工具调用。"
+            )
+        );
+        section.append(empty);
+        return section;
+    }
+
+    rounds.forEach((round, index) => {
+        section.append(buildToolRound(round, index));
+    });
+    return section;
+}
+
+function renderTrace(trace) {
+    traceContentEl.replaceChildren();
+    if (!trace) {
+        renderTraceState("failed", "本轮失败", "未获取到本轮轨迹。");
+        return;
+    }
+    traceContentEl.append(
+        buildTraceOverview(trace),
+        buildToolRounds(trace)
+    );
 }
 
 function renderTraceView() {
@@ -80,33 +529,7 @@ function renderTraceView() {
     }
 
     if (view.kind === "trace") {
-        const trace = view.trace;
-        if (!trace) {
-            renderTraceState("failed", "本轮失败", "未获取到本轮轨迹。");
-            return;
-        }
-
-        const labels = {
-            success: "本轮成功",
-            partial: "本轮部分成功",
-            failed: "本轮失败",
-        };
-        const kinds = {
-            success: "done",
-            partial: "partial",
-            failed: "failed",
-        };
-        const status = trace.status || "success";
-        const failedMessage = trace.error && trace.error.message;
-        const detail = status === "failed" && failedMessage
-            ? failedMessage
-            : "本轮轨迹已记录，详细统计与调用详情将在步骤 8、9 展示。";
-
-        renderTraceState(
-            kinds[status] || "done",
-            labels[status] || "本轮已完成",
-            detail
-        );
+        renderTrace(view.trace);
     }
 }
 
