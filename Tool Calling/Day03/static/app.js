@@ -14,8 +14,12 @@ const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
 const state = {
     isProcessing: false,
     isComposing: false,
+    isLoadingHistory: false,
     traceView: { kind: "empty" },
+    turns: [],
 };
+
+let traceRequestId = 0;
 
 const STATUS_LABELS = {
     success: { text: "成功", symbol: "✓", className: "success" },
@@ -486,11 +490,39 @@ function buildToolRounds(trace) {
     return section;
 }
 
-function renderTrace(trace) {
+function buildHistoryBanner(meta) {
+    const banner = document.createElement("div");
+    banner.className = "trace-history-banner";
+
+    const text = document.createElement("p");
+    text.className = "trace-history-text";
+    text.textContent = meta && meta.turnIndex
+        ? `正在查看第 ${meta.turnIndex} 轮历史轨迹`
+        : "正在查看历史轨迹";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-ghost button-small";
+    button.textContent = "回到最新";
+    button.addEventListener("click", () => {
+        if (state.isProcessing || state.isLoadingHistory) {
+            return;
+        }
+        showLatestTrace();
+    });
+
+    banner.append(text, button);
+    return banner;
+}
+
+function renderTrace(trace, meta = {}) {
     traceContentEl.replaceChildren();
     if (!trace) {
         renderTraceState("failed", "本轮失败", "未获取到本轮轨迹。");
         return;
+    }
+    if (meta.isHistory) {
+        traceContentEl.append(buildHistoryBanner(meta));
     }
     traceContentEl.append(
         buildTraceOverview(trace),
@@ -513,8 +545,8 @@ function renderTraceView() {
     if (view.kind === "processing") {
         renderTraceState(
             "processing",
-            "本轮正在执行…",
-            "正在请求模型并调用工具，请稍候。"
+            view.title || "本轮正在执行…",
+            view.detail || "正在请求模型并调用工具，请稍候。"
         );
         return;
     }
@@ -529,7 +561,7 @@ function renderTraceView() {
     }
 
     if (view.kind === "trace") {
-        renderTrace(view.trace);
+        renderTrace(view.trace, view.meta || {});
     }
 }
 
@@ -570,7 +602,11 @@ function clearInputError() {
     inputEl.removeAttribute("aria-invalid");
 }
 
-function appendMessage(role, text, { isError = false, isWaiting = false } = {}) {
+function appendMessage(
+    role,
+    text,
+    { isError = false, isWaiting = false, scroll = true } = {}
+) {
     const wrapper = document.createElement("article");
     const classes = ["message", `message-${role}`];
     if (isError) {
@@ -608,8 +644,41 @@ function appendMessage(role, text, { isError = false, isWaiting = false } = {}) 
         welcomeEl.hidden = true;
     }
 
-    scrollToBottom();
+    if (scroll) {
+        scrollToBottom();
+    }
     return { wrapper, bubble };
+}
+
+function attachTraceButton(wrapper, turn) {
+    if (!turn || !turn.turn_id || turn.history_saved === false) {
+        return;
+    }
+    if (turn.has_trace === false) {
+        return;
+    }
+
+    let actions = wrapper.querySelector(".message-actions");
+    if (actions && actions.querySelector("button")) {
+        return;
+    }
+    if (!actions) {
+        actions = document.createElement("div");
+        actions.className = "message-actions";
+        wrapper.append(actions);
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "link-button";
+    button.textContent = "查看轨迹";
+    button.addEventListener("click", () => {
+        if (state.isProcessing || state.isLoadingHistory) {
+            return;
+        }
+        showTurnTrace(turn.turn_id, turn.turn_index);
+    });
+    actions.append(button);
 }
 
 function appendWaitingMessage() {
@@ -650,6 +719,160 @@ function setProcessing(processing) {
     }
 }
 
+function setHistoryLoading(loading) {
+    state.isLoadingHistory = loading;
+
+    inputEl.disabled = loading;
+    sendButton.disabled = loading;
+    clearButton.disabled = loading;
+    sendButton.textContent = loading ? "加载中…" : "发送";
+
+    messagesEl.setAttribute("aria-busy", String(loading));
+    traceContentEl.setAttribute("aria-busy", String(loading));
+
+    if (!loading) {
+        inputEl.focus();
+        autoResizeInput();
+    }
+}
+
+function latestTurnId() {
+    if (!state.turns.length) {
+        return null;
+    }
+    return state.turns[state.turns.length - 1].turn_id;
+}
+
+function renderHistoryMessages() {
+    [...messagesEl.children].forEach((child) => {
+        if (child !== welcomeEl) {
+            child.remove();
+        }
+    });
+
+    if (!state.turns.length) {
+        if (welcomeEl) {
+            welcomeEl.hidden = false;
+        }
+        return;
+    }
+
+    if (welcomeEl) {
+        welcomeEl.hidden = true;
+    }
+
+    state.turns.forEach((turn) => {
+        appendMessage("user", turn.question || "", { scroll: false });
+
+        if (turn.answer !== null && turn.answer !== undefined) {
+            const message = appendMessage("assistant", turn.answer, { scroll: false });
+            attachTraceButton(message.wrapper, turn);
+        } else {
+            const message = appendMessage(
+                "assistant",
+                turn.error_message || "本轮未能生成回答。",
+                { isError: true, scroll: false }
+            );
+            attachTraceButton(message.wrapper, turn);
+        }
+    });
+
+    scrollToBottom();
+}
+
+async function showTurnTrace(turnId, turnIndex) {
+    if (!turnId) {
+        setTraceView({ kind: "failed", title: "本轮失败", detail: "未找到该轮轨迹。" });
+        return;
+    }
+
+    const requestId = ++traceRequestId;
+    try {
+        const response = await fetch(`/api/history/${encodeURIComponent(turnId)}`);
+        const data = await readJson(response);
+
+        if (requestId !== traceRequestId) {
+            return;
+        }
+
+        if (!response.ok || !data || !data.ok || !data.turn) {
+            setTraceView({
+                kind: "failed",
+                title: "轨迹加载失败",
+                detail: getApiError(data, "未找到该轮轨迹。"),
+            });
+            return;
+        }
+
+        const turn = data.turn;
+        const isHistory = turn.turn_id !== latestTurnId();
+        setTraceView({
+            kind: "trace",
+            trace: turn.trace,
+            meta: {
+                turnId: turn.turn_id,
+                turnIndex: turn.turn_index ?? turnIndex,
+                isHistory,
+            },
+        });
+    } catch (error) {
+        if (requestId !== traceRequestId) {
+            return;
+        }
+        setTraceView({
+            kind: "failed",
+            title: "轨迹加载失败",
+            detail: "网络请求异常，请稍后重试。",
+        });
+    }
+}
+
+async function showLatestTrace() {
+    const latest = state.turns[state.turns.length - 1];
+    if (!latest) {
+        setTraceView({ kind: "empty" });
+        return;
+    }
+    await showTurnTrace(latest.turn_id, latest.turn_index);
+}
+
+async function loadHistory() {
+    setHistoryLoading(true);
+    setTraceView({
+        kind: "processing",
+        title: "正在读取历史记录…",
+        detail: "正在恢复对话和轨迹。",
+    });
+
+    try {
+        const response = await fetch("/api/history");
+        const data = await readJson(response);
+
+        if (!response.ok || !data || !data.ok) {
+            throw new Error(getApiError(data, "读取历史记录失败"));
+        }
+
+        state.turns = Array.isArray(data.turns) ? data.turns : [];
+        renderHistoryMessages();
+
+        if (state.turns.length) {
+            await showLatestTrace();
+        } else {
+            setTraceView({ kind: "empty" });
+        }
+    } catch (error) {
+        state.turns = [];
+        renderHistoryMessages();
+        setTraceView({
+            kind: "failed",
+            title: "历史记录加载失败",
+            detail: "可以继续提问，但刷新后无法恢复之前的历史。",
+        });
+    } finally {
+        setHistoryLoading(false);
+    }
+}
+
 function restoreDraft(text) {
     inputEl.value = text;
     autoResizeInput();
@@ -678,8 +901,25 @@ function getApiError(data, fallback) {
     return fallback;
 }
 
+function buildTurnSummary(question, data, turnIndex) {
+    const trace = data.trace || {};
+    const error = trace.error || {};
+    return {
+        turn_id: data.turn_id,
+        turn_index: turnIndex,
+        question,
+        answer: data.answer ?? null,
+        status: trace.status || (data.ok ? "success" : "failed"),
+        created_at: trace.started_at || new Date().toISOString(),
+        finished_at: trace.finished_at || null,
+        has_trace: Boolean(data.trace),
+        error_message: error.message || null,
+        history_saved: data.history_saved !== false,
+    };
+}
+
 async function sendQuestion() {
-    if (state.isProcessing) {
+    if (state.isProcessing || state.isLoadingHistory) {
         return;
     }
 
@@ -691,6 +931,9 @@ async function sendQuestion() {
     }
 
     clearInputError();
+
+    // 新提问开始后，忽略仍在途中的历史轨迹请求
+    traceRequestId += 1;
 
     // 输入错误会在提交前被本地拦截；这里保存上一轮轨迹，供服务端 400 时恢复
     const previousTraceView = state.traceView;
@@ -745,12 +988,31 @@ async function sendQuestion() {
             return;
         }
 
+        const turnIndex = state.turns.length + 1;
+        const turn = buildTurnSummary(question, data, turnIndex);
+
         if (data && data.ok) {
             const answer = typeof data.answer === "string" && data.answer.trim()
                 ? data.answer
                 : "（助手未返回文本回答）";
             replaceWaiting(waiting, answer, false);
-            setTraceView({ kind: "trace", trace: data.trace });
+            setTraceView({
+                kind: "trace",
+                trace: data.trace,
+                meta: {
+                    turnId: data.turn_id,
+                    turnIndex,
+                    isHistory: false,
+                },
+            });
+
+            if (turn.turn_id) {
+                state.turns.push(turn);
+                attachTraceButton(waiting.wrapper, turn);
+                if (!turn.history_saved) {
+                    showInputError("本轮回答已生成，但历史保存失败。");
+                }
+            }
             return;
         }
 
@@ -758,12 +1020,26 @@ async function sendQuestion() {
         setTraceView({
             kind: "trace",
             trace: data && data.trace ? data.trace : { status: "failed" },
+            meta: {
+                turnId: data && data.turn_id,
+                turnIndex,
+                isHistory: false,
+            },
         });
         replaceWaiting(
             waiting,
             getApiError(data, "本轮未能生成回答，请稍后重试。"),
             true
         );
+
+        if (turn.turn_id) {
+            state.turns.push(turn);
+            attachTraceButton(waiting.wrapper, turn);
+            if (!turn.history_saved) {
+                showInputError("本轮回答已生成，但历史保存失败。");
+            }
+        }
+
         restoreDraft(raw);
     } catch (error) {
         setTraceView({
@@ -790,6 +1066,8 @@ function resetConversationUI() {
         welcomeEl.hidden = false;
     }
 
+    state.turns = [];
+    traceRequestId += 1;
     inputEl.value = "";
     clearInputError();
     autoResizeInput();
@@ -799,11 +1077,11 @@ function resetConversationUI() {
 }
 
 async function clearConversation() {
-    if (state.isProcessing) {
+    if (state.isProcessing || state.isLoadingHistory) {
         return;
     }
 
-    if (!window.confirm("确定清空当前对话和本轮轨迹吗？")) {
+    if (!window.confirm("确定清空当前对话、历史记录和本轮轨迹吗？")) {
         return;
     }
 
@@ -867,4 +1145,4 @@ document.querySelectorAll("[data-question]").forEach((button) => {
 
 renderTraceView();
 autoResizeInput();
-inputEl.focus();
+loadHistory();

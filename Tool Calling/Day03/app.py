@@ -1,21 +1,29 @@
-import asyncio
 import logging
+import os
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from prompt import SYSTEM_PROMPT
 from service import UserService
+from web_history import (
+    SessionManager,
+    WebHistoryStore,
+    new_turn_id,
+    utc_now_iso,
+)
 
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+
+COOKIE_NAME = "weather_session_id"
+COOKIE_MAX_AGE = 180 * 24 * 60 * 60
 
 
 class ChatRequest(BaseModel):
@@ -24,35 +32,6 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str
-
-
-class ConversationSession:
-    """单用户、进程内会话；只保存 user/assistant 最终消息。"""
-
-    def __init__(self):
-        self.messages = self._initial_messages()
-        self.lock = asyncio.Lock()
-        self.processing = False
-
-    @staticmethod
-    def _initial_messages():
-        return [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    @property
-    def busy(self):
-        # processing 在第一次 await 前同步置位，避免两个请求同时通过检查
-        return self.processing or self.lock.locked()
-
-    def add_turn(self, question: str, answer: str):
-        """记录一轮完成的对话，不保存 tool_calls 和 tool 消息。"""
-        self.messages.extend([
-            {"role": "user", "content": question},
-            {"role": "assistant", "content": answer},
-        ])
-
-    def reset(self):
-        """恢复为只含 system 的初始会话。"""
-        self.messages = self._initial_messages()
 
 
 def error_response(status_code: int, error_type: str, message: str):
@@ -68,10 +47,54 @@ def error_response(status_code: int, error_type: str, message: str):
     )
 
 
+def cookie_secure(request: Request):
+    configured = os.getenv("COOKIE_SECURE", "").strip().lower()
+    if configured in {"1", "true", "yes", "on"}:
+        return True
+    if configured in {"0", "false", "no", "off"}:
+        return False
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
 app = FastAPI(title="天气查询助手")
-session = ConversationSession()
-app.state.session = session
-app.state.user_service = UserService()
+history_root = os.getenv("WEB_HISTORY_DIR", "data/web_sessions").strip() or "data/web_sessions"
+app.state.history_store = WebHistoryStore(history_root)
+app.state.session_manager = SessionManager(app.state.history_store)
+app.state.user_service = UserService(persist_tracks=False)
+
+
+@app.middleware("http")
+async def attach_session(request: Request, call_next):
+    """为 /api/ 请求加载 Cookie 会话，并在需要时写回 Cookie。"""
+    path = request.url.path
+    should_bind = path.startswith("/api/") and path != "/api/health"
+
+    if should_bind:
+        try:
+            request.state.session = app.state.session_manager.get_or_create(
+                request.cookies.get(COOKIE_NAME)
+            )
+        except Exception:
+            logger.exception("load session failed")
+            return error_response(500, "session_error", "读取会话失败，请稍后重试")
+
+    response = await call_next(request)
+
+    session = getattr(request.state, "session", None)
+    if session is not None and request.cookies.get(COOKIE_NAME) != session.session_id:
+        response.set_cookie(
+            key=COOKIE_NAME,
+            value=session.session_id,
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=cookie_secure(request),
+            path="/",
+        )
+
+    return response
+
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -87,12 +110,13 @@ async def health():
 
 
 @app.post("/api/chat")
-async def chat(payload: ChatRequest):
+async def chat(payload: ChatRequest, request: Request):
     question = payload.question.strip()
     if not question:
         # 输入错误：不创建 Trace，不修改会话
         return error_response(400, "invalid_input", "请输入要查询的问题")
 
+    session = request.state.session
     if session.busy:
         return error_response(409, "busy", "正在处理中，请稍后重试")
 
@@ -104,19 +128,30 @@ async def chat(payload: ChatRequest):
                 question,
             )
 
-        if result.ok and result.answer is not None:
-            session.add_turn(question, result.answer)
-            return {
-                "ok": True,
-                "answer": result.answer,
-                "trace": result.trace,
-            }
+        trace = result.trace or {}
+        answer = result.answer if result.ok else None
+        ok = bool(result.ok and answer is not None)
+        status = trace.get("status") or ("success" if ok else "failed")
 
-        # 业务失败也返回 200，但失败轮次不写入模型上下文
+        turn = {
+            "turn_id": new_turn_id(),
+            "question": question,
+            "answer": answer,
+            "status": status,
+            "created_at": trace.get("started_at") or utc_now_iso(),
+            "finished_at": trace.get("finished_at"),
+            "trace": trace,
+        }
+        saved = session.add_turn(turn)
+        if not saved:
+            logger.error("turn persistence failed: %s", turn["turn_id"])
+
         return {
-            "ok": False,
-            "answer": None,
-            "trace": result.trace,
+            "ok": ok,
+            "answer": answer,
+            "trace": trace,
+            "turn_id": turn["turn_id"],
+            "history_saved": saved,
         }
     except Exception:
         logger.exception("chat request failed")
@@ -125,12 +160,38 @@ async def chat(payload: ChatRequest):
         session.processing = False
 
 
+@app.get("/api/history")
+async def history(request: Request):
+    session = request.state.session
+    return {
+        "ok": True,
+        "session_id": session.session_id,
+        "turns": session.history_summary(),
+    }
+
+
+@app.get("/api/history/{turn_id}")
+async def history_turn(turn_id: str, request: Request):
+    session = request.state.session
+    turn = session.get_turn(turn_id)
+    if turn is None:
+        return error_response(404, "turn_not_found", "未找到该轮历史记录")
+
+    return {"ok": True, "turn": turn}
+
+
 @app.post("/api/clear")
-async def clear():
+async def clear(request: Request):
+    session = request.state.session
     if session.busy:
         return error_response(409, "busy", "正在处理中，请稍后重试")
 
-    session.reset()
+    try:
+        session.reset()
+    except Exception:
+        logger.exception("clear history failed")
+        return error_response(500, "history_clear_failed", "清空历史失败，请稍后重试")
+
     return {"ok": True}
 
 

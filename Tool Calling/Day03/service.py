@@ -55,12 +55,13 @@ def trim(messages, max_rounds):
 
 
 class UserService:
-    def __init__(self):
+    def __init__(self, persist_tracks=True):
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url
         )
-        # 轨迹对象
+        # Web 端使用自己的 data/web_sessions 存储，关闭 CLI 的 tracks 追加
+        self.persist_tracks = persist_tracks
         self.tracks = Tracks("data/tracks.json")
 
     #模型请求
@@ -174,10 +175,11 @@ class UserService:
                     )
                     return RunResult(False, None, trace)
 
-                self.tracks.save({
-                    "id": uuid.uuid4().hex[:12],
-                    "tracks": messages[start_index:],
-                })
+                if self.persist_tracks:
+                    self.tracks.save({
+                        "id": uuid.uuid4().hex[:12],
+                        "tracks": messages[start_index:],
+                    })
 
                 recorder.finish(
                     "partial" if recorder.has_tool_errors() else "success",

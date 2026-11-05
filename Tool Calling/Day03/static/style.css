@@ -227,6 +227,28 @@ textarea {
     color: var(--muted);
 }
 
+.message-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.link-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.link-button:hover {
+    color: var(--accent-strong);
+}
+
 .spinner {
     flex: 0 0 auto;
     width: 14px;
@@ -313,6 +335,12 @@ textarea {
 .button-ghost:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--accent);
+}
+
+.button-small {
+    min-height: 32px;
+    padding: 6px 10px;
+    font-size: 12px;
 }
 
 .input-error {
@@ -410,6 +438,26 @@ textarea {
 
 .trace-state-failed .trace-state-title {
     color: var(--error);
+}
+
+.trace-history-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #c7d8ee;
+    border-radius: 10px;
+    background: var(--accent-soft);
+}
+
+.trace-history-text {
+    margin: 0;
+    color: var(--accent-strong);
+    font-size: 13px;
+    font-weight: 600;
 }
 
 /* 本轮轨迹概览 */
