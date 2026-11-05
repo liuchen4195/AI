@@ -89,11 +89,12 @@ async def main():
         result = await service.run(messages, user)
         print(f"本次对话耗时 {time.perf_counter() - start_time}s")
 
-        if result is None:
-            print("AI助手：本次调用失败，未保存历史")
+        if not result.ok or result.answer is None:
+            reason = result.trace.get("stop_reason") or "unknown"
+            print(f"AI助手：本次调用失败（{reason}），未保存历史")
             continue
 
-        print(f"AI助手：{result}")
+        print(f"AI助手：{result.answer}")
         messages.extend([
             {
                 "role": "user",
