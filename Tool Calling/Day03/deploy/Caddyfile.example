@@ -1,0 +1,28 @@
+# 1. 把 weather.example.com 替换成你的域名
+# 2. 把 admin 和 bcrypt hash 替换成你自己的访问账号
+#    生成 hash：caddy hash-password --plaintext '你的访问密码'
+# 3. 确认域名 A 记录已指向服务器公网 IP
+# 4. Caddy 2.8+ 使用 basic_auth；2.7 及更早版本使用 basicauth（其余写法相同）
+
+{
+    # 可选：填写邮箱，Let's Encrypt 证书到期提醒
+    email you@example.com
+}
+
+weather.example.com {
+    encode zstd gzip
+
+    basic_auth {
+        admin $2a$14$REPLACE_WITH_BCRYPT_HASH
+    }
+
+    header {
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+
+    reverse_proxy 127.0.0.1:8000
+}

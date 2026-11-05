@@ -60,6 +60,8 @@ python app.py
 
 浏览器打开 `http://127.0.0.1:8000`。
 
+部署到公网域名（云服务器 + Caddy + HTTPS + 访问密码）见 [`DEPLOY.md`](DEPLOY.md)。
+
 ### 命令行
 
 ```bash
@@ -114,8 +116,10 @@ Day03/
 ├── trace.py               # 轨迹采集与错误脱敏
 ├── tools.py               # 工具实现与白名单
 ├── static/                # 页面、样式、交互脚本
+├── deploy/                # Caddy / systemd / 生产环境变量模板
 ├── tests/                 # pytest 测试
 ├── data/                  # 课程历史、轨迹、会议室数据（运行时生成/读取）
+├── DEPLOY.md              # 域名部署设计
 ├── 开发设计方案.md
 ├── 验收记录.md
 └── 项目总结.md
