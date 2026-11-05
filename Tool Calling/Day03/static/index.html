@@ -4,12 +4,67 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>天气查询助手</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/app.js" defer></script>
 </head>
 <body>
-    <main>
-        <h1>天气查询助手</h1>
-        <p>页面骨架已就绪。</p>
-        <p>对话区域与本轮调用轨迹将在后续步骤实现。</p>
-    </main>
+    <div class="app">
+        <header class="app-header">
+            <div class="app-heading">
+                <h1>天气查询助手</h1>
+                <p class="app-subtitle">天气 · 空气质量 · 会议室</p>
+            </div>
+            <button id="clear-button" class="button button-ghost" type="button">清空对话</button>
+        </header>
+
+        <main class="layout">
+            <section class="panel conversation-panel" aria-label="对话区域">
+                <div id="messages" class="messages" aria-live="polite">
+                    <div id="welcome" class="welcome">
+                        <h2>你好，我是天气查询助手</h2>
+                        <p>可以问我城市天气、空气质量，或会议室信息。例如：</p>
+                        <div class="welcome-examples">
+                            <button type="button" class="example-button" data-question="北京天气怎么样？">北京天气怎么样？</button>
+                            <button type="button" class="example-button" data-question="比较一下北京和上海的天气和空气质量">比较北京和上海</button>
+                            <button type="button" class="example-button" data-question="星辰会议室能坐多少人？">星辰会议室信息</button>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="composer" class="composer" autocomplete="off">
+                    <label class="sr-only" for="question-input">输入天气问题</label>
+                    <div class="composer-row">
+                        <textarea
+                            id="question-input"
+                            name="question"
+                            class="question-input"
+                            rows="1"
+                            placeholder="输入城市、天气、空气质量或会议室问题…"
+                        ></textarea>
+                        <button id="send-button" class="button button-primary" type="submit">发送</button>
+                    </div>
+                    <p id="input-error" class="input-error" role="alert" hidden></p>
+                    <p class="composer-hint">Enter 发送，Shift+Enter 换行</p>
+                </form>
+            </section>
+
+            <aside class="panel trace-panel" aria-labelledby="trace-title">
+                <header class="panel-header">
+                    <h2 id="trace-title">本轮调用轨迹</h2>
+                    <span class="panel-note">仅显示最近一次提问</span>
+                </header>
+                <div id="trace-content" class="trace-content" aria-live="polite">
+                    <div class="trace-state trace-empty">
+                        <p class="trace-state-title">等待用户提问</p>
+                        <p class="trace-state-detail">提交问题后，这里会展示模型请求和工具调用过程。</p>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <noscript>
+        <p class="noscript-message">本页面需要启用 JavaScript 才能使用。</p>
+    </noscript>
 </body>
 </html>
