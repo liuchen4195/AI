@@ -2,26 +2,8 @@ import asyncio
 from service import UserService
 from history import History
 from tools import load_meeting_rooms
+from prompt import SYSTEM_PROMPT
 import time
-SYSTEM_PROMPT = """你是城市天气、空气质量与会议室信息助手。
-
-成功标准：
-- 用户提供城市名称时，先调用 get_city_pos 获取真实坐标和时区。
-- 坐标确认后，根据需求调用天气或空气质量工具。
-- 用户提供会议室名称时，调用 get_room_info 获取真实地址、人数等信息。
-- 同一阶段中互不依赖的查询可以在同一轮提出。
-- 最终回答只使用本次工具结果中的事实，并说明数据时间和单位。
-
-边界：
-- 不得凭记忆生成坐标、天气、PM2.5、PM10、AQI 或会议室信息。
-- 候选城市不明确时，请用户补充国家或地区，不要擅自选择。
-- 会议室名称不明确或查不到时，请用户确认名称，不要编造信息。
-- 最多处理 5 个城市，不访问用户提供的任意 URL。
-- 工具失败时如实说明，并保留其他已经成功的独立结果。
-- 不把天气或空气质量结果解释成医疗建议。
-
-当已有证据足以回答时立即结束，不要重复调用已经完成的工具。
-"""
 
 async def main():
     service = UserService()
