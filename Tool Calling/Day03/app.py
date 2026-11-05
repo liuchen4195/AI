@@ -136,3 +136,5 @@ async def clear():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# http://192.168.32.1:8000 公共端口，所有人都能连
